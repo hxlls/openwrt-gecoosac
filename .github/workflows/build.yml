@@ -1,0 +1,53 @@
+name: Build IPK Packages
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        arch: [x86_64, arm, mips]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Setup OpenWRT SDK - ${{ matrix.arch }}
+        run: |
+          # Download OpenWRT SDK for ${{ matrix.arch }}
+          wget https://downloads.openwrt.org/releases/22.03.3/targets/x86/64/openwrt-sdk-22.03.3-x86-64_gcc-11.2.0_musl.Linux-x86_64.tar.xz
+          tar -xf openwrt-sdk-*.tar.xz
+          sdk_dir=$(ls -d openwrt-sdk-* | head -1)
+          mv $sdk_dir sdk
+
+      - name: Build packages
+        run: |
+          cd sdk
+          cp -r ../gecoosac ./package/
+          cp -r ../luci-app-gecoosac ./package/
+          ./scripts/feeds update -a
+          ./scripts/feeds install -a
+          make defconfig
+          make package/gecoosac/compile V=s
+          make package/luci-app-gecoosac/compile V=s
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: ipk-${{ matrix.arch }}
+          path: sdk/bin/packages/*/
+
+      - name: Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v1
+        with:
+          files: sdk/bin/packages/*/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
